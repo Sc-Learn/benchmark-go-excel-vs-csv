@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"os"
 	"runtime"
+	"strings"
 	"time"
+	"bufio"
 
 	"github.com/xuri/excelize/v2"
 )
@@ -107,7 +109,7 @@ func exportToExcelStream(filename string, data []Applicant) error {
 	return f.SaveAs(filename)
 }
 
-func exportToCSVStream(filename string, data []Applicant) error {
+func exportToCSV(filename string, data []Applicant) error {
 	file, err := os.Create(filename)
 	if err != nil {
 		return err
@@ -133,6 +135,74 @@ func exportToCSVStream(filename string, data []Applicant) error {
 	}
 
 	return nil
+}
+
+func escapeCSVValue(val string) string {
+	if strings.ContainsAny(val, "\",\n\r") {
+		val = strings.ReplaceAll(val, "\"", "\"\"")
+		return fmt.Sprintf("\"%s\"", val)
+	}
+	return val
+}
+
+func appendToCSV(filePath string, row []string) error {
+	file, err := os.OpenFile(filePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+
+	var escaped []string
+	for _, val := range row {
+		escaped = append(escaped, escapeCSVValue(val))
+	}
+
+	line := strings.Join(escaped, ",") + "\n"
+	_, err = file.WriteString(line)
+	return err
+}
+
+func writeCSVRow(w *bufio.Writer, row []string) error {
+	for i, val := range row {
+		if i > 0 {
+			if _, err := w.WriteString(","); err != nil {
+				return err
+			}
+		}
+		escaped := escapeCSVValue(val)
+		if _, err := w.WriteString(escaped); err != nil {
+			return err
+		}
+	}
+	_, err := w.WriteString("\n")
+	return err
+}
+
+func exportToCSVStream(filename string, data []Applicant) error {
+	file, err := os.Create(filename)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+	
+	writer := bufio.NewWriterSize(file, 64*1024) // 64KB buffer
+
+	if err := writeCSVRow(writer, headers); err != nil {
+		return err
+	}
+
+	for _, a := range data {
+		record := []string{
+			a.Name, a.Email, a.CurrentStep, a.WhatsAppNumber, a.Experience,
+			a.PastRole, a.PastCompany, a.Campus, a.MinSalary,
+			a.CurrentLocation, a.ResumeLink, a.PortfolioLink, a.CandidateSource,
+		}
+		if err := writeCSVRow(writer, record); err != nil {
+			return err
+		}
+	}
+
+	return writer.Flush()
 }
 
 func printMemoryUsage() {
@@ -169,10 +239,12 @@ func benchmark(label, filename string, fn func() error) {
 	if err != nil {
 		fmt.Printf("[%s] Error: %v\n", label, err)
 	} else {
+		heap := (float64(endMem.HeapAlloc) / 1024 / 1024)
+		memAlloc := (float64(endMem.TotalAlloc) / 1024 / 1024)
+
 		fmt.Printf("\n[%s] Done in %s\n", label, duration)
-		fmt.Printf("Memory delta (Alloc): %.2f MB\n", float64(int64(endMem.Alloc)-int64(startMem.Alloc))/1024.0/1024.0)
-		fmt.Printf("Total Alloc Increase: %.2f MB\n", float64(int64(endMem.TotalAlloc)-int64(startMem.TotalAlloc))/1024.0/1024.0)
-		fmt.Printf("Heap Alloc Increase : %.2f MB\n", float64(int64(endMem.HeapAlloc)-int64(startMem.HeapAlloc))/1024.0/1024.0)
+		fmt.Printf("Total Alloc: %.2f MB\n", memAlloc)
+		fmt.Printf("Heap Alloc : %.2f MB\n", heap)
 
 		printFileSize(filename)
 		fmt.Printf("GC Count Increased  : %d\n", endMem.NumGC-startMem.NumGC)
@@ -185,8 +257,12 @@ func main() {
 
 	fmt.Println("Starting export benchmarks with", count, "records...\n")
 
-	benchmark("Export to CSV (Stream)", "benchmark_output.csv", func() error {
-		return exportToCSVStream("benchmark_output.csv", data)
+	benchmark("Export to CSV", "benchmark_output.csv", func() error {
+		return exportToCSV("benchmark_output.csv", data)
+	})
+
+	benchmark("Export to CSV (Stream)", "benchmark_output_stream.csv", func() error {
+		return exportToCSVStream("benchmark_output_stream.csv", data)
 	})
 
 	benchmark("Export to Excel (Stream + Style)", "benchmark_output.xlsx", func() error {
