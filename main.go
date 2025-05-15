@@ -162,7 +162,7 @@ func benchmark(label, filename string, fn func() error) {
 	err := fn()
 
 	duration := time.Since(start)
-	runtime.GC() // run GC after
+
 	var endMem runtime.MemStats
 	runtime.ReadMemStats(&endMem)
 
@@ -170,9 +170,10 @@ func benchmark(label, filename string, fn func() error) {
 		fmt.Printf("[%s] Error: %v\n", label, err)
 	} else {
 		fmt.Printf("\n[%s] Done in %s\n", label, duration)
-		fmt.Printf("Memory delta (Alloc): %.2f MB\n", float64(endMem.Alloc-startMem.Alloc)/1024.0/1024.0)
-		fmt.Printf("Total Alloc Increase: %.2f MB\n", float64(endMem.TotalAlloc-startMem.TotalAlloc)/1024.0/1024.0)
-		fmt.Printf("Heap Alloc Increase : %.2f MB\n", float64(endMem.HeapAlloc-startMem.HeapAlloc)/1024.0/1024.0)
+		fmt.Printf("Memory delta (Alloc): %.2f MB\n", float64(int64(endMem.Alloc)-int64(startMem.Alloc))/1024.0/1024.0)
+		fmt.Printf("Total Alloc Increase: %.2f MB\n", float64(int64(endMem.TotalAlloc)-int64(startMem.TotalAlloc))/1024.0/1024.0)
+		fmt.Printf("Heap Alloc Increase : %.2f MB\n", float64(int64(endMem.HeapAlloc)-int64(startMem.HeapAlloc))/1024.0/1024.0)
+
 		printFileSize(filename)
 		fmt.Printf("GC Count Increased  : %d\n", endMem.NumGC-startMem.NumGC)
 	}
